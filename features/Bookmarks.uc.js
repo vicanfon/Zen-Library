@@ -184,7 +184,7 @@
                 }
             } catch (e) { /* noop */ }
             // Helper: GUID -> numeric itemId. Tries the modern async API,
-            // falls back to the sync bookmarks-service getters.
+            // then sync nsINavBookmarksService getters (name varies by build).
             const resolveItemId = async (guid) => {
                 if (PlacesUtils.promiseItemId) {
                     return PlacesUtils.promiseItemId(guid);
@@ -193,10 +193,23 @@
                     const map = await PlacesUtils.promiseItemIds([guid]);
                     return map.get(guid);
                 }
-                // Sync legacy fallback
+                // Sync legacy fallback (method name differs across builds)
                 const svc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"]
                     .getService(Ci.nsINavBookmarksService);
-                return svc.getItemIdForGUID(guid);
+                for (const name of ["getItemIdForGUID", "getItemIdForGuid", "getIdForItemAt"]) {
+                    if (typeof svc[name] === "function") {
+                        return svc[name](guid);
+                    }
+                }
+                // Numeric well-known root ids: toolbar=3, menu=2, unfiled=5, mobile=6
+                const known = {
+                    toolbar____: 3,
+                    menu________: 2,
+                    unfiled_____: 5,
+                    mobile______: 6,
+                };
+                if (guid in known) return known[guid];
+                throw new Error("No GUID->itemId API available for " + guid);
             };
             for (const [guid, folderTitle] of roots) {
                 let folderId = null;
