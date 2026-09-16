@@ -1,15 +1,16 @@
 /* BOOKMARKS SECTION */
 .empty-icon.bookmarks-icon {
-    mask-image: url("chrome://browser/skin/bookmark.svg");
+    mask-image: url("chrome://browser/skin/bookmark-hollow.svg");
 }
 
+/* Sidebar tab icon: outline star, currentColor, slightly smaller to match stroke icons */
 .icon.bookmarks-icon {
-    mask-image: url("chrome://browser/skin/bookmark.svg");
+    mask-image: url("chrome://browser/skin/bookmark-hollow.svg");
     background-color: currentColor !important;
-    -webkit-mask-size: contain;
+    -webkit-mask-size: 20px 20px;
     -webkit-mask-repeat: no-repeat;
     -webkit-mask-position: center;
-    mask-size: contain;
+    mask-size: 20px 20px;
     mask-repeat: no-repeat;
     mask-position: center;
 }
