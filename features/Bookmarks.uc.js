@@ -15,6 +15,12 @@
             this._isFetching = false;
             this._initialized = false;
             this._observerAdded = false;
+            // Collapsible folder tree state (path -> expanded bool)
+            this._folderExpansion = new Map();
+            this._folderPaths = [];
+            this._treeCache = null;
+            this._treeCacheSource = null;
+            this._allExpanded = null;
         }
 
         async init() {
@@ -300,64 +306,237 @@
                     this._renderedCount = 0;
                     this._lastGroupLabel = null;
                 }
-                const term = (this._searchTerm || "").toLowerCase();
-                const filtered = term
-                    ? this._items.filter(i =>
-                        (i.title || "").toLowerCase().includes(term) ||
-                        (i.uri || "").toLowerCase().includes(term) ||
-                        (i.folder || "").toLowerCase().includes(term)
-                    )
-                    : this._items;
-                if (filtered.length === 0 && !this._isLoading) {
-                    if (!reset) return;
-                    const empty = this.el("div", { className: "empty-state" }, [
-                        this.el("div", { className: "empty-icon bookmarks-icon" }),
-                        this.el("h3", { textContent: this._searchTerm ? "No results found" : "No bookmarks found" }),
-                        this.el("p", { textContent: this._searchTerm ? "Try a different search term." : "Bookmark pages with Ctrl+D and they'll show up here." })
-                    ]);
-                    this._container.appendChild(empty);
+                const term = (this._searchTerm || "").trim().toLowerCase();
+                // Searching flattens the tree so matches are easy to scan.
+                if (term) {
+                    this._renderSearchResults(term, reset);
                     return;
                 }
-                const nextBatch = filtered.slice(this._renderedCount, this._renderedCount + this._batchSize);
-                if (nextBatch.length === 0) return;
-                const fragment = document.createDocumentFragment();
-                nextBatch.forEach(item => {
-                    try {
-                        const groupLabel = this._searchTerm ? "Search Results" : (item.folder || "Bookmarks");
-                        if (groupLabel !== this._lastGroupLabel) {
-                            fragment.appendChild(this.el("div", { className: "history-section-header", textContent: groupLabel }));
-                            this._lastGroupLabel = groupLabel;
-                        }
-                        const itemEl = document.createElement('zen-library-item');
-                        if (!itemEl || typeof itemEl.setAttribute !== 'function') return;
-                        itemEl.data = item;
-                        itemEl.setAttribute("icon", `page-icon:${item.uri}`);
-                        itemEl.setAttribute("title", item.title);
-                        itemEl.setAttribute("subtitle", item.uri);
-                        itemEl.setAttribute("time", item.dateStr || "");
-                        itemEl.onclick = () => {
-                            window.gBrowser.selectedTab = window.gBrowser.addTab(item.uri, {
-                                triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
-                            });
-                            window.gZenLibrary.close();
-                        };
-                        itemEl.oncontextmenu = (e) => {
-                            e.preventDefault();
-                            this._showContextMenu(e, item, itemEl);
-                        };
-                        fragment.appendChild(itemEl);
-                    } catch (itemError) {
-                        console.error("ZenLibrary Error processing bookmark item:", itemError, item);
-                    }
-                });
-                this._renderedCount += nextBatch.length;
-                const oldSpacer = this._container.querySelector(".history-bottom-spacer");
-                if (oldSpacer) oldSpacer.remove();
-                this._container.appendChild(fragment);
-                this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
+                this._renderTree(reset);
             } catch (e) {
                 console.error("ZenLibrary Error in bookmarks renderBatch:", e);
             }
+        }
+
+        _renderSearchResults(term, reset) {
+            const filtered = this._items.filter(i =>
+                (i.title || "").toLowerCase().includes(term) ||
+                (i.uri || "").toLowerCase().includes(term) ||
+                (i.folder || "").toLowerCase().includes(term)
+            );
+            if (filtered.length === 0) {
+                if (reset) this._container.appendChild(this._emptyState("No results found", "Try a different search term."));
+                return;
+            }
+            const nextBatch = filtered.slice(this._renderedCount, this._renderedCount + this._batchSize);
+            if (nextBatch.length === 0) return;
+            const fragment = document.createDocumentFragment();
+            nextBatch.forEach(item => {
+                try {
+                    if (this._lastGroupLabel !== "Search Results") {
+                        fragment.appendChild(this.el("div", { className: "history-section-header", textContent: "Search Results" }));
+                        this._lastGroupLabel = "Search Results";
+                    }
+                    fragment.appendChild(this._makeItemElement(item, 0));
+                } catch (itemError) {
+                    console.error("ZenLibrary Error processing bookmark item:", itemError, item);
+                }
+            });
+            this._renderedCount += nextBatch.length;
+            const oldSpacer = this._container.querySelector(".history-bottom-spacer");
+            if (oldSpacer) oldSpacer.remove();
+            this._container.appendChild(fragment);
+            this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
+        }
+
+        _emptyState(title, body) {
+            return this.el("div", { className: "empty-state" }, [
+                this.el("div", { className: "empty-icon bookmarks-icon" }),
+                this.el("h3", { textContent: title }),
+                this.el("p", { textContent: body })
+            ]);
+        }
+
+        _makeItemElement(item, depth) {
+            const itemEl = document.createElement('zen-library-item');
+            if (!itemEl || typeof itemEl.setAttribute !== 'function') return null;
+            itemEl.data = item;
+            itemEl.setAttribute("icon", `page-icon:${item.uri}`);
+            itemEl.setAttribute("title", item.title);
+            itemEl.setAttribute("subtitle", item.uri);
+            itemEl.setAttribute("time", item.dateStr || "");
+            if (depth > 0) {
+                itemEl.style.marginInlineStart = `${8 + depth * 14}px`;
+            }
+            itemEl.onclick = () => {
+                window.gBrowser.selectedTab = window.gBrowser.addTab(item.uri, {
+                    triggeringPrincipal: Services.scriptSecurityManager.getSystemPrincipal(),
+                });
+                window.gZenLibrary.close();
+            };
+            itemEl.oncontextmenu = (e) => {
+                e.preventDefault();
+                this._showContextMenu(e, item, itemEl);
+            };
+            return itemEl;
+        }
+
+        /**
+         * Build (and cache) a folder tree from the flat bookmark list.
+         * Folder paths look like "Bookmarks Menu / Bookmarks bar / GB / English".
+         */
+        _getTree() {
+            if (this._treeCache && this._treeCacheSource === this._items) {
+                return this._treeCache;
+            }
+            const root = this._newNode("", "");
+            for (const item of this._items) {
+                const parts = String(item.folder || "Bookmarks").split(" / ").map(s => s.trim()).filter(Boolean);
+                let node = root;
+                let path = "";
+                for (const part of parts) {
+                    path = path ? `${path} / ${part}` : part;
+                    let child = node.folders.get(part);
+                    if (!child) {
+                        child = this._newNode(part, path);
+                        node.folders.set(part, child);
+                    }
+                    node = child;
+                }
+                node.bookmarks.push(item);
+            }
+            this._folderPaths = [];
+            const count = (node) => {
+                let total = node.bookmarks.length;
+                for (const child of node.folders.values()) total += count(child);
+                node.total = total;
+                if (node.path) this._folderPaths.push(node.path);
+                return total;
+            };
+            for (const child of root.folders.values()) count(child);
+            this._treeCache = root;
+            this._treeCacheSource = this._items;
+            return root;
+        }
+
+        _newNode(name, path) {
+            return { name, path, folders: new Map(), bookmarks: [], total: 0 };
+        }
+
+        /** Folders first (roots in Firefox order, then alphabetical), then direct bookmarks. */
+        _sortedFolders(node) {
+            const ROOT_ORDER = ["Bookmarks Toolbar", "Bookmarks Menu", "Other Bookmarks", "Mobile Bookmarks"];
+            return Array.from(node.folders.values()).sort((a, b) => {
+                const ia = ROOT_ORDER.indexOf(a.name);
+                const ib = ROOT_ORDER.indexOf(b.name);
+                if (ia !== -1 || ib !== -1) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+                return a.name.localeCompare(b.name);
+            });
+        }
+
+        _renderTree(reset) {
+            // Don't flash "no bookmarks" while the first fetch is in flight
+            if (this._items.length === 0) {
+                if (reset && !this._isLoading) {
+                    this._container.appendChild(this._emptyState("No bookmarks found",
+                        "Bookmark pages with Ctrl+D and they'll show up here."));
+                }
+                return;
+            }
+            const tree = this._getTree();
+            this._container.appendChild(this._renderNode(tree, 0));
+            this._container.appendChild(this.el("div", { className: "history-bottom-spacer" }));
+        }
+
+        _renderNode(node, depth) {
+            const fragment = document.createDocumentFragment();
+            for (const folder of this._sortedFolders(node)) {
+                fragment.appendChild(this._renderFolder(folder, depth));
+            }
+            for (const bm of node.bookmarks) {
+                const itemEl = this._makeItemElement(bm, depth);
+                if (itemEl) fragment.appendChild(itemEl);
+            }
+            return fragment;
+        }
+
+        _renderFolder(folder, depth) {
+            const isExpanded = this._folderExpansion.get(folder.path) === true;
+            const wrap = this.el("div", {
+                className: `bm-folder ${isExpanded ? "expanded" : "collapsed"}`
+            });
+
+            const header = this.el("div", {
+                className: "bm-folder-header",
+                style: `padding-inline-start: ${8 + depth * 14}px;`
+            }, [
+                this.el("div", { className: "bm-chevron" }),
+                this.el("div", { className: "bm-folder-icon" }),
+                this.el("div", { className: "bm-folder-name", textContent: folder.name }),
+                this.el("div", { className: "bm-folder-count", textContent: String(folder.total) })
+            ]);
+
+            const content = this.el("div", { className: "bm-folder-content" });
+            if (!isExpanded) content.style.display = "none";
+
+            // Children are built lazily on first expand, so collapsed
+            // folders cost no DOM at all. The flag lives on the freshly
+            // created content element (not the cached tree node) so a
+            // re-render always rebuilds the children it needs.
+            const buildChildren = () => {
+                if (content._built) return;
+                content._built = true;
+                content.appendChild(this._renderNode(folder, depth + 1));
+            };
+            if (isExpanded) buildChildren();
+
+            header.onclick = (e) => {
+                e.stopPropagation();
+                const next = !(this._folderExpansion.get(folder.path) === true);
+                this._folderExpansion.set(folder.path, next);
+                wrap.classList.toggle("expanded", next);
+                wrap.classList.toggle("collapsed", !next);
+                content.style.display = next ? "" : "none";
+                if (next) buildChildren();
+            };
+
+            wrap.appendChild(header);
+            wrap.appendChild(content);
+            return wrap;
+        }
+
+        /** Expand or collapse every folder at once. */
+        expandAll(expand) {
+            this._getTree();
+            for (const path of this._folderPaths) {
+                if (path) this._folderExpansion.set(path, !!expand);
+            }
+            this._allExpanded = !!expand;
+            this.renderBatch(true);
+        }
+
+        /** Header control: Expand all / Collapse all (reuses media pill styles). */
+        renderFilterBar() {
+            const filterBar = this.el("div", { className: "media-filter-bar" });
+            const mk = (label, expand) => {
+                const pill = this.el("div", {
+                    className: `media-filter-pill ${this._allExpanded === expand ? "active" : ""}`,
+                    title: label,
+                    onclick: () => {
+                        for (const p of filterBar.querySelectorAll(".media-filter-pill")) {
+                            p.classList.remove("active");
+                        }
+                        pill.classList.add("active");
+                        this.expandAll(expand);
+                    }
+                }, [
+                    this.el("span", { className: "bm-filter-label", textContent: label })
+                ]);
+                return pill;
+            };
+            filterBar.appendChild(mk("Expand all", true));
+            filterBar.appendChild(mk("Collapse all", false));
+            return filterBar;
         }
 
         renderList(items) {
@@ -365,7 +544,11 @@
             this.renderBatch(true);
         }
 
-        loadMore() { if (!this._isLoading) this.renderBatch(false); }
+        /** Infinite scroll only applies to flattened search results. */
+        loadMore() {
+            if (this._isLoading) return;
+            if ((this._searchTerm || "").trim()) this.renderBatch(false);
+        }
 
         _ensureContextMenu() {
             if (document.getElementById("zen-bookmarks-context-menu")) return;
