@@ -19,6 +19,7 @@
         }
     };
 
+    _loadFeatureIfMissing("ZenLibraryBookmarks", "features/Bookmarks.uc.js");
     _loadFeatureIfMissing("ZenLibraryDownloads", "features/Downloads.uc.js");
     _loadFeatureIfMissing("ZenLibraryHistory",   "features/History.uc.js");
     _loadFeatureIfMissing("ZenLibraryMedia",     "features/Media.uc.js");
@@ -188,6 +189,8 @@
                     return { ...state, history: action.payload };
                 case 'SET_TAB':
                     return { ...state, activeTab: action.payload };
+                case 'SET_BOOKMARKS':
+                    return { ...state, bookmarks: action.payload };
                 default:
                     return state;
             }
@@ -207,6 +210,7 @@
             this.store = (window.gZenLibrary && window.gZenLibrary.store) ? window.gZenLibrary.store : new ZenStore({
                 downloads: [],
                 history: [],
+                bookmarks: [],
                 activeTab: 'downloads'
             });
 
@@ -229,6 +233,7 @@
             this.media = preInit.media || (window.ZenLibraryMedia ? new window.ZenLibraryMedia(this) : null);
             this.spaces = preInit.spaces || (window.ZenLibrarySpaces ? new window.ZenLibrarySpaces(this) : null);
             this.boosts = preInit.boosts || (window.ZenLibraryBoosts ? new window.ZenLibraryBoosts(this) : null);
+            this.bookmarks = preInit.bookmarks || (window.ZenLibraryBookmarks ? new window.ZenLibraryBookmarks(this) : null);
 
             // Update the library reference on pre-initialized modules so they can use our el() helper
             if (this.downloads) this.downloads.library = this;
@@ -236,6 +241,7 @@
             if (this.media) this.media.library = this;
             if (this.spaces) this.spaces.library = this;
             if (this.boosts) this.boosts.library = this;
+            if (this.bookmarks) this.bookmarks.library = this;
         }
 
         get activeTab() { return this._activeTab; }
@@ -283,7 +289,7 @@
 
                     const sidebarItemsContainer = document.createElement("div");
                     sidebarItemsContainer.className = "sidebar-items";
-                    const sidebarItems = ["downloads", "media", "history", "spaces", "boosts"];
+                    const sidebarItems = ["downloads", "media", "history", "spaces", "boosts", "bookmarks"];
                     const parser = new DOMParser();
 
                     sidebarItems.forEach(id => {
@@ -634,6 +640,7 @@
                         if (this.history && this.activeTab === "history") val = this.history._searchTerm;
                         else if (this.downloads && this.activeTab === "downloads") val = this.downloads._searchTerm;
                         else if (this.media && this.activeTab === "media") val = this.media._searchTerm;
+                        else if (this.bookmarks && this.activeTab === "bookmarks") val = this.bookmarks._searchTerm;
 
                         const searchInput = this.el("input", {
                             type: "text",
@@ -653,6 +660,9 @@
                                 } else if (this.activeTab === "media" && this.media) {
                                     this.media._searchTerm = v;
                                     this.media.fetchDownloads().then(d => this.media.renderList(d));
+                                } else if (this.activeTab === "bookmarks" && this.bookmarks) {
+                                    this.bookmarks._searchTerm = v;
+                                    this.bookmarks.renderBatch(true);
                                 } else if (this.activeTab === "boosts" && this.boosts) {
                                     this.boosts._searchTerm = v;
                                     this.boosts.renderList();
@@ -687,6 +697,7 @@
                 if (!this.media && window.ZenLibraryMedia) this.media = new window.ZenLibraryMedia(this);
                 if (!this.spaces && window.ZenLibrarySpaces) this.spaces = new window.ZenLibrarySpaces(this);
                 if (!this.boosts && window.ZenLibraryBoosts) this.boosts = new window.ZenLibraryBoosts(this);
+                if (!this.bookmarks && window.ZenLibraryBookmarks) this.bookmarks = new window.ZenLibraryBookmarks(this);
 
                 if (this.activeTab === "spaces" && this.spaces) {
                     // Spaces has its own intelligent re-render check usually
@@ -710,6 +721,12 @@
                 else if (this.activeTab === "media" && this.media) {
                     if (!content.querySelector(".media-grid") || tabChanged) {
                         elToAppend = this.media.render();
+                        needsAppend = true;
+                    }
+                }
+                else if (this.activeTab === "bookmarks" && this.bookmarks) {
+                    if (!content.querySelector(".library-list-container") || tabChanged) {
+                        elToAppend = this.bookmarks.render();
                         needsAppend = true;
                     }
                 }
@@ -814,6 +831,7 @@
             this.store = new ZenStore({
                 downloads: [],
                 history: [],
+                bookmarks: [],
                 activeTab: 'downloads'
             });
 
@@ -868,6 +886,10 @@
                 }
                 if (window.ZenLibrarySpaces && !this._modules.spaces) {
                     this._modules.spaces = new window.ZenLibrarySpaces(shell);
+                }
+                if (window.ZenLibraryBookmarks && !this._modules.bookmarks) {
+                    this._modules.bookmarks = new window.ZenLibraryBookmarks(shell);
+                    if (this._modules.bookmarks.init) this._modules.bookmarks.init();
                 }
                 if (window.ZenLibraryBoosts && !this._modules.boosts) {
                     this._modules.boosts = new window.ZenLibraryBoosts(shell);

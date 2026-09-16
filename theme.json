@@ -33,6 +33,11 @@
       "description": "Spaces Module",
       "include": ["chrome://browser/content/browser.xhtml"]
     },
+    "features/Bookmarks.uc.js": {
+      "name": "Zen Library Bookmarks",
+      "description": "Bookmarks Module",
+      "include": ["chrome://browser/content/browser.xhtml"]
+    },
     "features/Boosts.uc.js": {
       "name": "Zen Library Boosts",
       "description": "Boosts Module",
