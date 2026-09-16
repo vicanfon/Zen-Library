@@ -95,21 +95,25 @@
             this._isLoading = true;
             try {
                 const { PlacesUtils } = ChromeUtils.importESModule("resource://gre/modules/PlacesUtils.sys.mjs");
-                // Strategy: query each known bookmark root with the classic
-                // history API in BOOKMARKS queryType. Walk every root so
-                // deeply nested folders (like your GB > English > ...) are found.
+                // Primary: fetch() per root folder — walks every subfolder.
+                // (fetchTree is not implemented on this Zen build; classic
+                // setFolders history queries need numeric ids we can't resolve,
+                // so both are retired in favour of this.)
                 let items = [];
                 try {
-                    items = await this._fetchViaFolderQueries(PlacesUtils);
+                    items = await this._fetchViaFetchPerFolder(PlacesUtils);
+                    if (items.length) console.log("[ZenLibrary Bookmarks] source: bookmarks.fetch()");
                 } catch (qErr) {
-                    console.warn("ZenLibrary Bookmarks folder query failed:", qErr);
+                    console.warn("ZenLibrary Bookmarks folder fetch failed:", qErr);
                 }
-                // Fallback: async fetchTree — full recursive tree
+                // Last resort: read the Places DB directly (read-only SELECT).
+                // Needed because this build has no fetchTree and no GUID->id API.
                 if (!items.length) {
                     try {
-                        items = await this._fetchViaTree(PlacesUtils);
-                    } catch (treeErr) {
-                        console.warn("ZenLibrary Bookmarks fetchTree failed:", treeErr);
+                        items = await this._fetchViaSQL(PlacesUtils);
+                        if (items.length) console.log("[ZenLibrary Bookmarks] source: places SQL");
+                    } catch (sqlErr) {
+                        console.warn("ZenLibrary Bookmarks SQL fallback failed:", sqlErr);
                     }
                 }
                 items.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
@@ -126,33 +130,6 @@
             }
         }
 
-        async _fetchViaTree(PlacesUtils) {
-            const items = [];
-            const tree = await PlacesUtils.bookmarks.fetchTree({ includeItemDates: true });
-            if (!tree || !tree.children) return items;
-            const walk = (node, folderName) => {
-                const children = node.children || [];
-                for (const child of children) {
-                    if (!child) continue;
-                    if (child.type === PlacesUtils.bookmarks.TYPE_BOOKMARK && child.url) {
-                        const href = (child.url && child.url.href) ? child.url.href : String(child.url);
-                        if (href && !href.startsWith("place:")) {
-                            const ms = child.dateAdded instanceof Date
-                                ? child.dateAdded.getTime()
-                                : (Number(child.dateAdded) || Date.now());
-                            items.push(this._makeItem(child.guid, child.title || href, href, folderName, ms));
-                        }
-                    } else if (child.type === PlacesUtils.bookmarks.TYPE_FOLDER && child.children) {
-                        walk(child, child.title || folderName || "Bookmarks");
-                    }
-                }
-            };
-            for (const root of tree.children) {
-                walk(root, root.title || "Bookmarks");
-            }
-            return items;
-        }
-
         _makeItem(guid, title, uri, folder, ms) {
             return {
                 guid, title, uri,
@@ -164,15 +141,13 @@
             };
         }
 
-        async _fetchViaFolderQueries(PlacesUtils) {
-            // Classic, battle-tested path: one history query per bookmark
-            // root folder with queryType = QUERY_TYPE_BOOKMARKS. This is how
-            // Firefox's own Library window lists bookmarks, so it sees the
-            // same data you see in your screenshot (Toolbar / Menu / Other).
+        async _fetchViaFetchPerFolder(PlacesUtils) {
+            // Uses PlacesUtils.bookmarks.fetch({ parentGuid }) — GUID-based,
+            // so no numeric itemId resolution is needed. Recursively walks
+            // each root (Toolbar / Menu / Other / Mobile) to any depth,
+            // e.g. Bookmarks Menu > Bookmarks bar > GB > English > ...
             const items = [];
             const seen = new Set();
-            // Resolve root folder itemIds from stable GUIDs (async-safe
-            // across Firefox versions — numeric folder getters vary).
             const roots = [
                 [PlacesUtils.bookmarks.toolbarGuid, "Bookmarks Toolbar"],
                 [PlacesUtils.bookmarks.menuGuid, "Bookmarks Menu"],
@@ -183,106 +158,104 @@
                     roots.push([PlacesUtils.bookmarks.mobileGuid, "Mobile Bookmarks"]);
                 }
             } catch (e) { /* noop */ }
-            // Helper: GUID -> numeric itemId. Tries the modern async API,
-            // then sync nsINavBookmarksService getters (name varies by build).
-            const resolveItemId = async (guid) => {
-                if (PlacesUtils.promiseItemId) {
-                    return PlacesUtils.promiseItemId(guid);
+            const TYPE_BOOKMARK = PlacesUtils.bookmarks.TYPE_BOOKMARK;
+            const TYPE_FOLDER = PlacesUtils.bookmarks.TYPE_FOLDER;
+            const toMs = (d) => {
+                if (d instanceof Date) return d.getTime();
+                if (typeof d === "number") return d > 1e14 ? Math.floor(d / 1000) : d;
+                return Date.now();
+            };
+            // fetch({parentGuid}) with no callback resolves to the FIRST
+            // match only, so pass a collector callback to get all children.
+            // Both shapes are handled for safety across builds.
+            const fetchChildren = async (parentGuid) => {
+                const collected = [];
+                try {
+                    const first = await PlacesUtils.bookmarks.fetch(
+                        { parentGuid },
+                        b => { if (b) collected.push(b); }
+                    );
+                    if (!collected.length && first) collected.push(first);
+                } catch (e) {
+                    console.warn("ZenLibrary Bookmarks: fetch failed for", parentGuid, e);
                 }
-                if (PlacesUtils.promiseItemIds) {
-                    const map = await PlacesUtils.promiseItemIds([guid]);
-                    return map.get(guid);
-                }
-                // Sync legacy fallback (method name differs across builds)
-                const svc = Cc["@mozilla.org/browser/nav-bookmarks-service;1"]
-                    .getService(Ci.nsINavBookmarksService);
-                for (const name of ["getItemIdForGUID", "getItemIdForGuid", "getIdForItemAt"]) {
-                    if (typeof svc[name] === "function") {
-                        return svc[name](guid);
+                return collected;
+            };
+            const walk = async (parentGuid, folderName) => {
+                const children = await fetchChildren(parentGuid);
+                for (const child of children) {
+                    if (!child) continue;
+                    if (child.type === TYPE_BOOKMARK && child.url) {
+                        const href = (child.url && child.url.href) ? child.url.href : String(child.url);
+                        if (!href || href.startsWith("place:")) continue;
+                        const key = (child.guid || "") + "|" + href;
+                        if (seen.has(key)) continue;
+                        seen.add(key);
+                        items.push(this._makeItem(
+                            child.guid, child.title || href, href,
+                            folderName || "Bookmarks", toMs(child.dateAdded)
+                        ));
+                    } else if (child.type === TYPE_FOLDER && child.guid) {
+                        // Skip the tags virtual root if it ever shows up
+                        try {
+                            if (PlacesUtils.bookmarks.tagsGuid && child.guid === PlacesUtils.bookmarks.tagsGuid) continue;
+                        } catch (e) { /* noop */ }
+                        const subName = child.title
+                            ? (folderName ? `${folderName} / ${child.title}` : child.title)
+                            : folderName;
+                        await walk(child.guid, subName);
                     }
                 }
-                // Numeric well-known root ids: toolbar=3, menu=2, unfiled=5, mobile=6
-                const known = {
-                    toolbar____: 3,
-                    menu________: 2,
-                    unfiled_____: 5,
-                    mobile______: 6,
-                };
-                if (guid in known) return known[guid];
-                throw new Error("No GUID->itemId API available for " + guid);
             };
             for (const [guid, folderTitle] of roots) {
-                let folderId = null;
-                try {
-                    folderId = await resolveItemId(guid);
-                } catch (e) {
-                    console.warn("ZenLibrary Bookmarks: no itemId for", guid, e);
-                    continue;
-                }
-                if (folderId == null) continue;
-                try {
-                    const query = PlacesUtils.history.getNewQuery();
-                    query.setFolders([folderId], 1);
-                    query.queryType = query.QUERY_TYPE_BOOKMARKS;
-                    const options = PlacesUtils.history.getNewQueryOptions();
-                    options.sortingMode = options.SORT_BY_DATE_DESCENDING;
-                    options.maxResults = 5000;
-                    const result = PlacesUtils.history.executeQuery(query, options);
-                    const root = result.root;
-                    root.containerOpen = true;
-                    try {
-                        this._collectQueryNodes(root, folderTitle, items, seen);
-                    } finally {
-                        root.containerOpen = false;
-                    }
-                } catch (e) {
-                    console.warn("ZenLibrary Bookmarks query failed for folder", guid, e);
-                }
+                if (!guid) continue;
+                await walk(guid, folderTitle);
             }
             return items;
         }
 
-        _collectQueryNodes(node, folderName, items, seen) {
-            // Recursively walk result nodes: containers = folders,
-            // leaves with uri = actual bookmarks.
-            const count = node.childCount || 0;
-            for (let i = 0; i < count; i++) {
-                let child = null;
-                try { child = node.getChild(i); } catch (e) { continue; }
-                if (!child) continue;
-                // Folder container — descend, tracking the folder path.
-                // Note: plain bookmark leaves can also report hasChildren,
-                // so only treat real containers (no uri) as folders.
-                const isFolder = child.isContainer && !child.uri && !child.isLivemarkContainer;
-                if (isFolder && child.hasChildren) {
-                    let wasOpen = child.containerOpen;
-                    try {
-                        if (!wasOpen) child.containerOpen = true;
-                        const subName = child.title
-                            ? (folderName ? `${folderName} / ${child.title}` : child.title)
-                            : folderName;
-                        this._collectQueryNodes(child, subName, items, seen);
-                    } catch (e) { /* skip unreadable branch */ }
-                    finally {
-                        try { if (!wasOpen) child.containerOpen = false; } catch (e) { /* noop */ }
-                    }
-                    continue;
-                }
-                const uri = child.uri;
-                if (!uri || uri.startsWith("place:")) continue;
-                const key = (child.bookmarkGuid || "") + "|" + uri;
-                if (seen.has(key)) continue;
-                seen.add(key);
-                const ms = child.dateAdded ? Math.floor(child.dateAdded / 1000)
-                    : (child.time ? Math.floor(child.time / 1000) : Date.now());
+        async _fetchViaSQL(PlacesUtils) {
+            // Read-only fallback straight from the Places database.
+            // Builds the full folder path via a recursive CTE so group
+            // headers match the Firefox Library tree.
+            const items = [];
+            const db = await PlacesUtils.promiseDBConnection();
+            const rows = await db.executeCached(`
+                WITH RECURSIVE tree(id, parent, path) AS (
+                    SELECT id, parent, COALESCE(title, '') FROM moz_bookmarks WHERE id = 1
+                    UNION ALL
+                    SELECT b.id, b.parent, tree.path || ' / ' || COALESCE(b.title, '')
+                    FROM moz_bookmarks b JOIN tree ON b.parent = tree.id
+                )
+                SELECT b.guid AS guid,
+                       COALESCE(b.title, '') AS title,
+                       p.url AS url,
+                       b.dateAdded AS dateAdded,
+                       tree.path AS folderPath
+                FROM moz_bookmarks b
+                JOIN moz_places p ON p.id = b.fk
+                JOIN tree ON tree.id = b.parent
+                WHERE b.type = 1
+                  AND p.url NOT LIKE 'place:%'
+                  AND tree.path NOT LIKE '%tag________%'
+                ORDER BY b.dateAdded DESC
+            `);
+            for (const row of rows) {
+                const uri = row.getResultByName("url");
+                if (!uri) continue;
+                // Strip the invisible Places root from the path
+                let folder = row.getResultByName("folderPath") || "Bookmarks";
+                const parts = folder.split(" / ");
+                if (parts.length > 1) folder = parts.slice(1).join(" / ");
                 items.push(this._makeItem(
-                    child.bookmarkGuid || uri,
-                    child.title || uri,
+                    row.getResultByName("guid"),
+                    row.getResultByName("title") || uri,
                     uri,
-                    folderName || "Bookmarks",
-                    ms
+                    folder,
+                    Math.floor((row.getResultByName("dateAdded") || 0) / 1000)
                 ));
             }
+            return items;
         }
 
         _observeBookmarkChanges() {
