@@ -16,31 +16,36 @@
 /* sprite-sizes wide and the frame is picked by animation. We use a     */
 /* single static SVG, so the box must be squared and the animation      */
 /* disabled, otherwise the glyph stretches into an invisible sliver.    */
+/*                                                                      */
+/* Sine loads this file as a USER sheet, and user-sheet rules lose to   */
+/* the browser's own (author) rules regardless of specificity - so      */
+/* every declaration that competes with zen-library.css needs           */
+/* !important.                                                          */
 /* ------------------------------------------------------------------ */
 
 [data-section="bookmarks"] :is(.zen-library-tab-icon-image, .empty-state-icon-image) {
-  width: var(--zen-library-sprite-size);
-  background-size: 100% 100%;
-  background-repeat: no-repeat;
-  background-position: center;
-  -moz-context-properties: fill, stroke;
-  fill: var(--stroke);
+  width: var(--zen-library-sprite-size) !important;
+  background-size: 100% 100% !important;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+  -moz-context-properties: fill, stroke !important;
+  fill: var(--stroke) !important;
 }
 
 /* Hollow star while the tab is inactive (matching the other tabs'
    outline look), filled star when active. */
 [data-section="bookmarks"] :is(.zen-library-tab-icon-image, .empty-state-icon-image) {
-  background-image: url("chrome://browser/skin/zen-icons/bookmark-hollow.svg");
+  background-image: url("chrome://browser/skin/zen-icons/bookmark-hollow.svg") !important;
 }
 
 zen-library .zen-library-tab[data-section="bookmarks"][active] .zen-library-tab-icon-image {
-  background-image: url("chrome://browser/skin/zen-icons/bookmark.svg");
-  fill: var(--fill);
+  background-image: url("chrome://browser/skin/zen-icons/bookmark.svg") !important;
+  fill: var(--fill) !important;
 }
 
 /* Don't run the sprite animation on a single-frame icon. */
 zen-library .zen-library-tab[data-section="bookmarks"][animate] .zen-library-tab-icon-image {
-  animation: none;
+  animation: none !important;
 }
 
 /* ------------------------------------------------------------------ */
