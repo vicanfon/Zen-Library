@@ -9,19 +9,38 @@
  * chrome CSS applies to it.
  */
 
-/* Sidebar tab icon (and empty-state icon). */
+/* ------------------------------------------------------------------ */
+/* Sidebar tab icon                                                     */
+/*                                                                      */
+/* Zen's tab icons are 36-frame sprite strips: the element is 36        */
+/* sprite-sizes wide and the frame is picked by animation. We use a     */
+/* single static SVG, so the box must be squared and the animation      */
+/* disabled, otherwise the glyph stretches into an invisible sliver.    */
+/* ------------------------------------------------------------------ */
+
 [data-section="bookmarks"] :is(.zen-library-tab-icon-image, .empty-state-icon-image) {
-  background-image: url("chrome://browser/skin/zen-icons/bookmark.svg");
+  width: var(--zen-library-sprite-size);
   background-size: 100% 100%;
   background-repeat: no-repeat;
   background-position: center;
+  -moz-context-properties: fill, stroke;
+  fill: var(--stroke);
 }
 
-/* bookmark.svg is fill-only, while Zen hides icons of inactive tabs by
-   forcing fill: transparent. Restore the outline colour so the tab is
-   visible before it is selected. */
-zen-library .zen-library-tab[data-section="bookmarks"]:not([active]) .zen-library-tab-icon-image {
-  fill: var(--stroke);
+/* Hollow star while the tab is inactive (matching the other tabs'
+   outline look), filled star when active. */
+[data-section="bookmarks"] :is(.zen-library-tab-icon-image, .empty-state-icon-image) {
+  background-image: url("chrome://browser/skin/zen-icons/bookmark-hollow.svg");
+}
+
+zen-library .zen-library-tab[data-section="bookmarks"][active] .zen-library-tab-icon-image {
+  background-image: url("chrome://browser/skin/zen-icons/bookmark.svg");
+  fill: var(--fill);
+}
+
+/* Don't run the sprite animation on a single-frame icon. */
+zen-library .zen-library-tab[data-section="bookmarks"][animate] .zen-library-tab-icon-image {
+  animation: none;
 }
 
 /* ------------------------------------------------------------------ */
@@ -39,6 +58,10 @@ zen-library [data-section="bookmarks"] .zen-library-bm-chevron {
   opacity: 0.7;
   transition: transform 0.15s ease;
   transform: rotate(0deg);
+  /* Same recipe as .zen-library-row-icon so the chevron matches the
+     folder icon's colour. */
+  -moz-context-properties: fill;
+  fill: currentColor;
 }
 
 zen-library [data-section="bookmarks"] .zen-library-bm-folder[open] > .zen-library-bm-folder-row .zen-library-bm-chevron {

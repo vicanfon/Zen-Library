@@ -56,7 +56,14 @@
         if (onclick) node.onclick = onclick;
         if (oninput) node.oninput = oninput;
         if (onauxclick) node.onauxclick = onauxclick;
-        for (const key in other) node.setAttribute(key, other[key]);
+        for (const key in other) {
+            const value = other[key];
+            // Skip null/undefined - setAttribute(key, null) stringifies and
+            // makes presence-checking attribute selectors (e.g. [open]) match
+            // every row.
+            if (value === null || value === undefined) continue;
+            node.setAttribute(key, value);
+        }
         for (const child of children) {
             if (child) node.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
         }
