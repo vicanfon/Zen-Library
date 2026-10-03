@@ -1,0 +1,52 @@
+/*
+ * Zen Bookmarks Section
+ * Chrome stylesheet for the bookmarks section added to Zen's native
+ * library sidebar. Everything the section reuses (rows, groups, search
+ * box, empty state) is already styled by Zen's own zen-library.css;
+ * only the tab icon and the folder tree are ours.
+ *
+ * The <zen-library> element renders into light DOM, so document-level
+ * chrome CSS applies to it.
+ */
+
+/* Sidebar tab icon (and empty-state icon). */
+[data-section="bookmarks"] :is(.zen-library-tab-icon-image, .empty-state-icon-image) {
+  background-image: url("chrome://browser/skin/zen-icons/bookmark.svg");
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* bookmark.svg is fill-only, while Zen hides icons of inactive tabs by
+   forcing fill: transparent. Restore the outline colour so the tab is
+   visible before it is selected. */
+zen-library .zen-library-tab[data-section="bookmarks"]:not([active]) .zen-library-tab-icon-image {
+  fill: var(--stroke);
+}
+
+/* ------------------------------------------------------------------ */
+/* Folder tree                                                          */
+/* ------------------------------------------------------------------ */
+
+zen-library [data-section="bookmarks"] .zen-library-bm-folder-row {
+  cursor: pointer;
+}
+
+zen-library [data-section="bookmarks"] .zen-library-bm-chevron {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  opacity: 0.7;
+  transition: transform 0.15s ease;
+  transform: rotate(0deg);
+}
+
+zen-library [data-section="bookmarks"] .zen-library-bm-folder[open] > .zen-library-bm-folder-row .zen-library-bm-chevron {
+  transform: rotate(90deg);
+}
+
+/* Nesting indents compound naturally: each open folder's children are
+   wrapped in another .zen-library-bm-children. */
+zen-library [data-section="bookmarks"] .zen-library-bm-children {
+  margin-inline-start: 20px;
+}
