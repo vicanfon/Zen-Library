@@ -29,10 +29,9 @@ A Sine mod that adds a **Bookmarks** section to Zen's **native library sidebar**
 
 Zen renders its sidebar tabs from the public `zenLibrarySections` object on the `<zen-library>` element (`src/zen/library/ZenLibrary.mjs` in zen-browser/desktop). This mod:
 
-1. imports `ZenLibrary` and `ZenLibrarySearchSection` from `moz-src://`,
-2. defines a `zen-library-bookmarks-section` Lit element extending Zen's own search-section base (so it inherits the native search box, filter scaffold and scroll sentinel),
-3. injects it as `lib.zenLibrarySections.bookmarks`,
-4. adds the tab icon and folder-tree styling from `bookmarks.css` (the library renders into light DOM, so document-level chrome CSS reaches it).
+1. waits for Zen's own `<zen-library>` element to register, then grabs the class from the custom-element registry (importing `ZenLibrary.mjs` directly would fail — Lit, which it depends on, needs a `document` that `ChromeUtils.importESModule`'s realm doesn't have),
+2. injects a bookmarks section definition into `lib.zenLibrarySections.bookmarks` — the section is a plain `HTMLElement` that reuses Zen's own row/search/empty-state CSS classes (the library renders into light DOM, so `bookmarks.css` reaches it),
+3. adds the tab icon and folder-tree styling.
 
 Zen has no Fluent string for a bookmarks tab label, so the mod fills it with "Bookmarks" via a small MutationObserver fallback.
 
@@ -41,5 +40,6 @@ Zen has no Fluent string for a bookmarks tab label, so the mod fills it with "Bo
 Open the Browser Console (`Ctrl+Shift+J`) and filter for `[ZenBookmarksSection]`:
 
 - `Module loaded` / `Bookmarks section added` — working.
-- `This Zen build does not ship the native library` — your Zen is older than the native library, or the old Zen Library mod won the `<zen-library>` registration race: uninstall it and clear the startup cache.
+- `Zen's <zen-library> element never registered` — your Zen is older than the native library, or the old Zen Library mod won the `<zen-library>` registration race: uninstall it and clear the startup cache.
+- `Injection failed` — read the attached error; usually means Zen changed its library internals.
 - Missing tab icon — the chrome stylesheet didn't load; check Sine's mod settings for the style entry.
