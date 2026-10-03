@@ -32,15 +32,10 @@
   fill: var(--stroke) !important;
 }
 
-/* Hollow star while the tab is inactive (matching the other tabs'
-   outline look), filled star when active. */
+/* Always the hollow star in the accent colour - including when the tab
+   is selected. (The filled state uses Zen's --fill, a much darker blue.) */
 [data-section="bookmarks"] :is(.zen-library-tab-icon-image, .empty-state-icon-image) {
   background-image: url("chrome://browser/skin/zen-icons/bookmark-hollow.svg") !important;
-}
-
-zen-library .zen-library-tab[data-section="bookmarks"][active] .zen-library-tab-icon-image {
-  background-image: url("chrome://browser/skin/zen-icons/bookmark.svg") !important;
-  fill: var(--fill) !important;
 }
 
 /* Don't run the sprite animation on a single-frame icon. */
