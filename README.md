@@ -1,21 +1,45 @@
-# Zen-Library
-A Sine mod which adds Library feature to Zen Browser
+# Zen Library — Bookmarks Section
 
-Press hotkey "**Alt Shift B**"
+A Sine mod that adds a **Bookmarks** section to Zen's **native library sidebar** — the panel Zen opens with its library toolbar button or the swipe-from-edge gesture. No extra panel, no extra bar: your bookmarks appear as one more tab next to History, Downloads, Boosts and Spaces.
 
-<img width="1426" height="803" alt="image" src="https://github.com/user-attachments/assets/3701c50e-1454-4107-8a48-bd86fcf15e7a" />
-<img width="1426" height="803" alt="image" src="https://github.com/user-attachments/assets/5c536564-2d5a-410c-bde3-7751d8a2aa8b" />
-<img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/b8585f4f-3fd0-44fd-94ff-f2d53c8ad441" />
-<img width="1386" height="808" alt="image" src="https://github.com/user-attachments/assets/779b5577-13fb-46be-bb0c-e8c4273366e7" />
+> **Version 3.0 note:** this repo used to ship a full standalone "Zen Library" panel (its own sidebar overlay with downloads, history, media, spaces, boosts and bookmarks tabs, opened with Alt+Shift+B). Zen's native library made that panel obsolete — and its `<zen-library>` element name collided with Zen's, breaking both. The old code still exists in this repo's git history; going forward this mod only injects the Bookmarks section into Zen's own sidebar. **Remove the old install in Sine and clear the startup cache (`about:support`) when updating.**
 
+## Features
 
-###
-Installation process:
-###
-Note: You must have [Sine](https://github.com/CosmoCreeper/Sine) installed to download this mod
-###
-1. go to settings > Sine Mods and below the marketplace you will see a settings icon, in sine settings you must enable downloading JS from unofficial sources
-2. below the marketplace Sine has an option to paste github repository link, past the link of the repository github.comJustAdumbPrsn/Zen-Library and it should install itself
-3. If sine asks to restart then do that or go to about:support and click Clear startup cache, it will restart.
-4. after the mod is installed successfully, press Alt Shift B to open/close the library. 
-Since this is an experimental version, it may have minor bugs so i will appreciate it if i can be notified about them.
+- Native look: uses Zen's own row, group, search-box and empty-state styling.
+- Collapsible folder tree (Toolbar / Menu / Other / Mobile, any nesting depth), folders first in Firefox order.
+- Live search across title, URL and folder, with infinite scroll on results.
+- Opens on click (closes the library, like native sections); Ctrl+click / middle-click opens in a background tab and keeps the library open.
+- Delete button on hover, mirroring the history section's trash action.
+- Updates live via Places observers — adding or removing a bookmark refreshes the section.
+
+## Requirements
+
+- [Sine](https://github.com/CosmoCreeper/Sine)
+- Zen build that ships the native library (`moz-src:///zen/library/ZenLibrary.mjs`, Zen 1.20+).
+
+## Installation
+
+1. In Zen: Settings → Sine Mods → settings icon next to the marketplace, enable **downloading JS from unofficial sources** (this mod ships JavaScript).
+2. Paste `https://github.com/vicanfon/Zen-Library` into Sine's install box and install.
+3. If you previously had version 2.x installed, uninstall it first (or update in place and then clear the startup cache via `about:support` → Clear startup cache).
+4. Open Zen's library — the **Bookmarks** tab is there.
+
+## How it works
+
+Zen renders its sidebar tabs from the public `zenLibrarySections` object on the `<zen-library>` element (`src/zen/library/ZenLibrary.mjs` in zen-browser/desktop). This mod:
+
+1. imports `ZenLibrary` and `ZenLibrarySearchSection` from `moz-src://`,
+2. defines a `zen-library-bookmarks-section` Lit element extending Zen's own search-section base (so it inherits the native search box, filter scaffold and scroll sentinel),
+3. injects it as `lib.zenLibrarySections.bookmarks`,
+4. adds the tab icon and folder-tree styling from `bookmarks.css` (the library renders into light DOM, so document-level chrome CSS reaches it).
+
+Zen has no Fluent string for a bookmarks tab label, so the mod fills it with "Bookmarks" via a small MutationObserver fallback.
+
+## Troubleshooting
+
+Open the Browser Console (`Ctrl+Shift+J`) and filter for `[ZenBookmarksSection]`:
+
+- `Module loaded` / `Bookmarks section added` — working.
+- `This Zen build does not ship the native library` — your Zen is older than the native library, or the old Zen Library mod won the `<zen-library>` registration race: uninstall it and clear the startup cache.
+- Missing tab icon — the chrome stylesheet didn't load; check Sine's mod settings for the style entry.
